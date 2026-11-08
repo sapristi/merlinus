@@ -47,6 +47,8 @@ export function EtatSauvegarde(arg1:string):Promise<app.EtatSauvegarde>;
 
 export function EtatsBoite(arg1:string):Promise<app.EtatsUUID>;
 
+export function ImporterDossierPerso():Promise<app.HistoirePerso>;
+
 export function ImporterHistoirePerso():Promise<Array<app.HistoirePerso>>;
 
 export function Internet():Promise<boolean>;

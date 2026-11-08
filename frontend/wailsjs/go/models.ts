@@ -187,6 +187,24 @@ export namespace app {
 	        this.favoris = source["favoris"];
 	    }
 	}
+	export class PistePerso {
+	    uuid: string;
+	    titre: string;
+	    ext: string;
+	    taille: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PistePerso(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.uuid = source["uuid"];
+	        this.titre = source["titre"];
+	        this.ext = source["ext"];
+	        this.taille = source["taille"];
+	    }
+	}
 	export class HistoirePerso {
 	    uuid: string;
 	    titre: string;
@@ -197,6 +215,7 @@ export namespace app {
 	    duree: number;
 	    img?: string;
 	    referencee: boolean;
+	    pistes?: PistePerso[];
 	
 	    static createFrom(source: any = {}) {
 	        return new HistoirePerso(source);
@@ -213,7 +232,26 @@ export namespace app {
 	        this.duree = source["duree"];
 	        this.img = source["img"];
 	        this.referencee = source["referencee"];
+	        this.pistes = this.convertValues(source["pistes"], PistePerso);
 	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
 	}
 	export class MiseAJour {
 	    courante: string;
@@ -235,6 +273,7 @@ export namespace app {
 	        this.verifiee = source["verifiee"];
 	    }
 	}
+	
 	export class RadioDispo {
 	    uuid: string;
 	    titre: string;

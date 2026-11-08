@@ -15,7 +15,7 @@ import { fmtOctets, fmtDuree } from './format.js';
 import { creerVueArbre } from './arbreboite.js';
 import { creerDecouverte } from './decouverte.js';
 
-import { EtatBoite, CatalogueInitial, RechercheCatalogue, EpisodesSerie, Internet, ArbreBoite, ArbreTravail, EnregistrerArbreTravail, Boites, NommerBoite, DemarrerVeille, PublierEditions, DefinirWifi, DefinirHoraires, LireHoraires, LireFavoris, LireEcoutes, RegleHeure, DernieresEcoutes, EjecterBoite, EtatSauvegarde, RestaurerBoite, RetirerBoite, SupprimerBoite, TelechargerEpisode, TelechargerImageSerie, EtatsBoite, EditionsEnAttente, EstimationStockage, LireStockage, TaillesArbre, EnregistrerSuivi, NouveautesAccueil, ImporterHistoirePerso, ListerHistoiresPerso, SupprimerHistoirePerso, DefinirIllustrationPerso, RenommerHistoirePerso, VerifierMiseAJour, JournaliserIHM } from '../wailsjs/go/app/App';
+import { EtatBoite, CatalogueInitial, RechercheCatalogue, EpisodesSerie, Internet, ArbreBoite, ArbreTravail, EnregistrerArbreTravail, Boites, NommerBoite, DemarrerVeille, PublierEditions, DefinirWifi, DefinirHoraires, LireHoraires, LireFavoris, LireEcoutes, RegleHeure, DernieresEcoutes, EjecterBoite, EtatSauvegarde, RestaurerBoite, RetirerBoite, SupprimerBoite, TelechargerEpisode, TelechargerImageSerie, EtatsBoite, EditionsEnAttente, EstimationStockage, LireStockage, TaillesArbre, EnregistrerSuivi, NouveautesAccueil, ImporterHistoirePerso, ImporterDossierPerso, ListerHistoiresPerso, SupprimerHistoirePerso, DefinirIllustrationPerso, RenommerHistoirePerso, VerifierMiseAJour, JournaliserIHM } from '../wailsjs/go/app/App';
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { creerListeVirtuelle } from './vliste.js';
 import { creerLecteur, fmtTemps } from './lecteur.js';
@@ -1518,15 +1518,17 @@ export async function monterIHM(app) {
   function cartePerso(h, i) {
     const etat = etatUUID(h.uuid);
     const actif = lecteurPerso.actif(h.uuid);
+    const serie = Array.isArray(h.pistes) && h.pistes.length > 0;
     const vis = h.img
       ? '<img class="net" loading="lazy" decoding="async" src="' + h.img + '" alt="">'
-      : '<span class="ph">🎙️</span>';
+      : '<span class="ph">' + (serie ? '📁' : '🎙️') + '</span>';
     const fond = h.img ? '' : ' style="background:' + GRADS[i % GRADS.length] + '"';
     const fav = estFavori(h.uuid) ? '<span class="ep-fav" title="' + escAttr(t('ihm_fav_titre')) + '">♥</span>' : '';
     const duree = h.duree ? '<span class="ep-duree">' + fmtTemps(h.duree) + '</span>' : '';
-    const meta = esc((h.ext || '').toUpperCase() + (h.taille ? ' · ' + fmtOctets(h.taille) : ''));
+    const meta = esc((serie ? plur(h.pistes.length, 'ihm_perso_pistes_un', 'ihm_perso_pistes_n') : (h.ext || '').toUpperCase())
+      + (h.taille ? ' · ' + fmtOctets(h.taille) : ''));
     return '<article class="ep-card perso' + (actif ? ' joue' : '') + '" data-uuid="' + escAttr(h.uuid) + '">'
-      + '<div class="ep-vis-wrap"><div class="ep-vis"' + fond + '>' + vis + fav + duree + '</div>' + lecteurPerso.bouton(h.uuid, true) + '</div>'
+      + '<div class="ep-vis-wrap"><div class="ep-vis"' + fond + '>' + vis + fav + duree + '</div>' + (serie ? '' : lecteurPerso.bouton(h.uuid, true)) + '</div>'
       + '<div class="perso-tools">'
         + '<button class="perso-tool" data-act="renom" title="' + t('ihm_perso_renommer') + '" aria-label="' + t('ihm_perso_renommer') + '">' + icone('pencil') + '</button>'
         + '<button class="perso-tool" data-act="illus" title="' + t('ihm_perso_illustrer') + '" aria-label="' + t('ihm_perso_illustrer') + '">' + icone('image') + '</button>'
@@ -1534,7 +1536,7 @@ export async function monterIHM(app) {
       + '</div>'
       + '<div class="ep-txt"><b>' + esc(h.titre) + '</b><span class="ep-date">' + esc(dateAjoutPerso(h.ajout)) + '</span>'
       + '<span class="ep-meta">' + meta + '</span></div>'
-      + lecteurPerso.progres(h.uuid, h.duree)
+      + (serie ? '' : lecteurPerso.progres(h.uuid, h.duree))
       + '<div class="ep-pied">' + ligneArbrePerso(etat) + '</div></article>';
   }
   function renderPerso(liste) {
@@ -1542,9 +1544,13 @@ export async function monterIHM(app) {
     persoListe = liste;
     const imp = '<button class="dropzone" id="importBtn"' + (persoBusy ? ' disabled' : '') + '><span class="di">＋</span><span>'
       + t('ihm_perso_import') + '</span><small>' + t('ihm_perso_import_sub') + '</small></button>';
-    wrap.innerHTML = '<div class="perso-grille">' + imp + liste.map(cartePerso).join('') + '</div>';
+    const impDos = '<button class="dropzone" id="importDosBtn"' + (persoBusy ? ' disabled' : '') + '><span class="di">📁</span><span>'
+      + t('ihm_perso_import_dossier') + '</span><small>' + t('ihm_perso_import_dossier_sub') + '</small></button>';
+    wrap.innerHTML = '<div class="perso-grille">' + imp + impDos + liste.map(cartePerso).join('') + '</div>';
     const ib = wrap.querySelector('#importBtn');
     if (ib) { ib.addEventListener('click', importerPerso); brancherFeedbackDrop(ib); }
+    const idb = wrap.querySelector('#importDosBtn');
+    if (idb) idb.addEventListener('click', importerDossierPerso);
     if (!wrap.dataset.delegue) { // un seul jeu d'ecouteurs : les cartes sont re-rendues
       wrap.dataset.delegue = '1';
       wrap.addEventListener('click', (ev) => {
@@ -1588,6 +1594,22 @@ export async function monterIHM(app) {
       else if (e.key === 'Escape') { e.preventDefault(); valider(true); }
     });
     inp.addEventListener('blur', () => valider(false));
+  }
+  // Import d'un dossier : une carte serie (une histoire par audio du dossier).
+  async function importerDossierPerso() {
+    if (persoBusy) return;
+    persoBusy = true; renderPerso(await safePerso());
+    try {
+      lecteurPerso.arreter();
+      await ImporterDossierPerso();
+    } catch (e) {
+      persoBusy = false;
+      await chargerPerso();
+      alert(t('ihm_perso_import_dossier_err') + '\n' + msgErreur(e));
+      return;
+    }
+    persoBusy = false;
+    await chargerPerso();
   }
   async function importerPerso() {
     if (persoBusy) return;
@@ -1648,13 +1670,19 @@ export async function monterIHM(app) {
       if (!cat) return false;
       if (!Array.isArray(cat.child)) cat.child = [];
       if (!cat.child.some((x) => x.uuid === h.uuid)) {
-        cat.child.push({ uuid: h.uuid, title: h.titre, add_time: Math.floor(Date.now() / 1000), _new: true });
+        const maintenant = Math.floor(Date.now() / 1000);
+        const n = { uuid: h.uuid, title: h.titre, add_time: maintenant, _new: true };
+        // Serie perso : dossier serie + une histoire par piste, dans l'ordre.
+        if (Array.isArray(h.pistes) && h.pistes.length) {
+          n.child = h.pistes.map((p) => ({ uuid: p.uuid, title: p.titre, add_time: maintenant, _new: true }));
+        }
+        cat.child.push(n);
       }
     });
     if (!fait) return;
     await chargerPerso();
   }
-  // Retrait d'une feuille perso (1 niveau : directement sous une categorie).
+  // Retrait d'une histoire ou d'une serie perso (directement sous une categorie).
   // _new -> retrait immediat ; deja sur la boite -> marquee _rem (a supprimer).
   async function retirerPersoArbre(uuid) {
     const mac = box().mac; if (!mac) return false;
@@ -1663,7 +1691,7 @@ export async function monterIHM(app) {
       for (let ci = 0; ci < a.length && !fait; ci++) {
         const cat = a[ci];
         if (!Array.isArray(cat.child)) continue;
-        const li = cat.child.findIndex((n) => n.uuid === uuid && !Array.isArray(n.child));
+        const li = cat.child.findIndex((n) => n.uuid === uuid);
         if (li < 0) continue;
         if (cat.child[li]._new || cat._new) cat.child.splice(li, 1);
         else cat.child[li]._rem = true;

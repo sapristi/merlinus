@@ -3,10 +3,15 @@ package app
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
+	"os"
 	"path/filepath"
+	"regexp"
+	"sort"
 	"strings"
 	"time"
 
+	"github.com/louis49/merlinus/internal/itunes"
 	"github.com/louis49/merlinus/internal/library"
 	"github.com/louis49/merlinus/internal/store"
 	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
@@ -29,6 +34,30 @@ type HistoirePerso struct {
 	// Referencee : l'histoire est presente dans l'arbre de travail d'une boite
 	// (calcule, non persiste). Quand vrai, la suppression est interdite.
 	Referencee bool `json:"referencee"`
+	// Pistes : non vide pour une SERIE importee d'un dossier (une carte, une
+	// histoire par piste). UUID est alors celui du dossier serie sur la boite,
+	// sans audio propre ; Ext est vide et Taille la somme des pistes.
+	Pistes []PistePerso `json:"pistes,omitempty"`
+}
+
+// PistePerso : une histoire d'une serie perso.
+type PistePerso struct {
+	UUID   string `json:"uuid"`
+	Titre  string `json:"titre"`
+	Ext    string `json:"ext"`
+	Taille int64  `json:"taille"`
+}
+
+// uuidsMedias : uuids des medias d'une entree (ses pistes pour une serie).
+func (h HistoirePerso) uuidsMedias() []string {
+	if len(h.Pistes) == 0 {
+		return []string{h.UUID}
+	}
+	u := make([]string, len(h.Pistes))
+	for i, p := range h.Pistes {
+		u[i] = p.UUID
+	}
+	return u
 }
 
 // persoReferencees collecte les uuids d'histoires presentes dans un arbre de
@@ -80,8 +109,12 @@ func (a *App) ListerHistoiresPerso() []HistoirePerso {
 	ref := a.persoReferencees()
 	for i := range l {
 		l[i].Img = imgDataURL(l[i].UUID)
-		l[i].Duree = library.DureeAudio(l[i].UUID)
-		l[i].Referencee = ref[l[i].UUID]
+		l[i].Duree = 0
+		for _, u := range l[i].uuidsMedias() {
+			l[i].Duree += library.DureeAudio(u)
+			l[i].Referencee = l[i].Referencee || ref[u]
+		}
+		l[i].Referencee = l[i].Referencee || ref[l[i].UUID]
 	}
 	if l == nil {
 		l = []HistoirePerso{}
@@ -202,17 +235,46 @@ func (a *App) SupprimerHistoirePerso(uuid string) error {
 	// Garde-fou : une histoire encore dans l'arbre d'une boite ne peut pas etre
 	// supprimee (sinon media manquant a la publication). L'IHM grise deja le
 	// bouton ; ceci couvre les autres appels.
-	if a.persoReferencees()[uuid] {
-		return errIHM("err_perso_referencee")
-	}
+	ref := a.persoReferencees()
 	a.muPerso.Lock()
 	defer a.muPerso.Unlock()
+	l := a.lirePerso()
+	var cible HistoirePerso
+	autres := map[string]bool{} // medias aussi utilises par une autre entree
+	for _, h := range l {
+		if h.UUID == uuid {
+			cible = h
+			continue
+		}
+		for _, u := range h.uuidsMedias() {
+			autres[u] = true
+		}
+	}
+	if cible.UUID == "" {
+		cible = HistoirePerso{UUID: uuid}
+	}
+	if ref[uuid] {
+		return errIHM("err_perso_referencee")
+	}
+	for _, u := range cible.uuidsMedias() {
+		if ref[u] {
+			return errIHM("err_perso_referencee")
+		}
+	}
 	// Medias d'abord : si un fichier resiste (verrou Windows durable), l'histoire
 	// reste au registre et l'utilisateur peut reessayer, sans fichier fantome.
-	if err := library.SupprimerMedia(uuid); err != nil {
-		return errDetail("err_perso_suppression", err)
+	medias := cible.uuidsMedias()
+	if len(cible.Pistes) > 0 {
+		medias = append(medias, cible.UUID) // illustration de la serie
 	}
-	l := a.lirePerso()
+	for _, u := range medias {
+		if autres[u] {
+			continue
+		}
+		if err := library.SupprimerMedia(u); err != nil {
+			return errDetail("err_perso_suppression", err)
+		}
+	}
 	out := make([]HistoirePerso, 0, len(l))
 	for _, h := range l {
 		if h.UUID != uuid {
@@ -241,10 +303,87 @@ func (a *App) DefinirIllustrationPerso(uuid, dataURL string) error {
 	l := a.lirePerso()
 	for i := range l {
 		if l[i].UUID == uuid {
+			// Serie : chaque histoire reprend l'illustration (la boite en exige une).
+			for _, p := range l[i].Pistes {
+				if err := library.DefinirIllustration(p.UUID, raw); err != nil {
+					return err
+				}
+			}
 			l[i].Cover = true
 			a.ecrirePerso(l)
 			break
 		}
 	}
 	return nil
+}
+
+// ImporterDossierPerso ouvre un selecteur de dossier natif et importe son
+// contenu comme une serie (voir importerDossier). Annulation : entree vide.
+func (a *App) ImporterDossierPerso() (HistoirePerso, error) {
+	d, err := wailsruntime.OpenDirectoryDialog(a.ctx, wailsruntime.OpenDialogOptions{
+		Title: "Choisir un dossier d'audios (une série)",
+	})
+	if err != nil || d == "" {
+		return HistoirePerso{}, err
+	}
+	return a.importerDossier(d)
+}
+
+// reNumeroPiste : numero de piste en tete de titre ("01. ", "10 - ", "3_").
+var reNumeroPiste = regexp.MustCompile(`^\d+\s*[.\-_)]\s*`)
+
+// importerDossier importe les audios a la racine d'un dossier (sous-dossiers et
+// autres fichiers ignores), tries par nom, en UNE entree serie titree du nom du
+// dossier. L'uuid de la serie derive de ses pistes : re-importer le meme dossier
+// met a jour la carte (titre, illustration et date conserves).
+func (a *App) importerDossier(dossier string) (HistoirePerso, error) {
+	entrees, err := os.ReadDir(dossier)
+	if err != nil {
+		return HistoirePerso{}, err
+	}
+	var noms []string
+	for _, e := range entrees {
+		if e.Type().IsRegular() && extAudioPerso(e.Name()) {
+			noms = append(noms, e.Name())
+		}
+	}
+	if len(noms) == 0 {
+		return HistoirePerso{}, fmt.Errorf("aucun fichier audio (mp3, m4a, aac) dans %q", filepath.Base(dossier))
+	}
+	sort.Strings(noms)
+	h := HistoirePerso{Titre: filepath.Base(dossier), Ajout: time.Now().Unix()}
+	var ids []string
+	for _, n := range noms {
+		imp, err := library.ImporterAudioLocal(filepath.Join(dossier, n))
+		if err != nil {
+			return HistoirePerso{}, fmt.Errorf("%s : %w", n, err)
+		}
+		titre := strings.TrimSpace(reNumeroPiste.ReplaceAllString(imp.Titre, ""))
+		if titre == "" {
+			titre = imp.Titre
+		}
+		h.Pistes = append(h.Pistes, PistePerso{UUID: imp.UUID, Titre: titre, Ext: imp.Ext, Taille: imp.Taille})
+		h.Taille += imp.Taille
+		ids = append(ids, imp.UUID)
+	}
+	h.UUID = itunes.UUIDDeterministe("perso-serie:" + strings.Join(ids, ","))
+
+	a.muPerso.Lock()
+	l := a.lirePerso()
+	remplace := false
+	for i := range l {
+		if l[i].UUID == h.UUID {
+			h.Titre, h.Ajout, h.Cover = l[i].Titre, l[i].Ajout, l[i].Cover
+			l[i] = h
+			remplace = true
+			break
+		}
+	}
+	if !remplace {
+		l = append(l, h)
+	}
+	a.ecrirePerso(l)
+	a.muPerso.Unlock()
+	h.Img = imgDataURL(h.UUID)
+	return h, nil
 }
