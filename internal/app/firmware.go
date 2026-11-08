@@ -21,9 +21,30 @@ func controlerFirmware(c *device.Client) (device.Firmware, error) {
 	}
 	switch v.Comparer(firmwareMinimum) {
 	case -1:
+		// Certaines boites annoncent une version d'une autre lignee (ex. 1.3.18)
+		// tout en utilisant le format 2.1.23 : la preuve est un pl_enc.bin
+		// dechiffrable avec leur MAC.
+		if formatChiffre(c) {
+			log.Printf("firmware %s anterieur a %s mais pl_enc.bin au format 2.1.23 : poursuite", v, firmwareMinimum)
+			return v, nil
+		}
 		return v, errIHM("err_firmware_ancien", "version", v.String(), "minimum", firmwareMinimum.String())
 	case 1:
 		log.Printf("firmware %s plus recent que la version validee %s : poursuite", v, firmwareMinimum)
 	}
 	return v, nil
+}
+
+// formatChiffre : vrai si la boite porte un pl_enc.bin dechiffrable avec sa MAC.
+func formatChiffre(c *device.Client) bool {
+	mac, err := c.MACBytes()
+	if err != nil {
+		return false
+	}
+	enc, err := c.GetFileBytes("pl_enc.bin")
+	if err != nil {
+		return false
+	}
+	_, err = device.DechiffrerPlaylist(mac, enc)
+	return err == nil
 }

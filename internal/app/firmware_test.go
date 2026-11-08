@@ -32,3 +32,37 @@ func TestControlerFirmware(t *testing.T) {
 		})
 	}
 }
+
+// Une boite qui annonce une version plus ancienne (ex. 1.3.18, lignee
+// materielle distincte) mais porte un pl_enc.bin dechiffrable avec sa MAC
+// utilise le format 2.1.23 : acceptee. Sans pl_enc.bin lisible : refusee.
+func TestControlerFirmwareFormatChiffre(t *testing.T) {
+	t.Run("pl_enc.bin dechiffrable", func(t *testing.T) {
+		b := nouvelleFausseBoite(t)
+		b.firmware = []byte{1, 3, 18, 0}
+		b.poserPlaylist(arbreReel())
+		v, err := controlerFirmware(b.connecter())
+		if err != nil {
+			t.Fatalf("erreur = %v, attendu accepte", err)
+		}
+		if v.String() != "1.3.18" {
+			t.Errorf("version = %s, attendu 1.3.18", v)
+		}
+	})
+	t.Run("sans pl_enc.bin", func(t *testing.T) {
+		b := nouvelleFausseBoite(t)
+		b.firmware = []byte{1, 3, 18, 0}
+		if _, err := controlerFirmware(b.connecter()); cleErreur(err) != "err_firmware_ancien" {
+			t.Fatalf("erreur = %v, attendu err_firmware_ancien", err)
+		}
+	})
+	t.Run("pl_enc.bin d'une autre boite", func(t *testing.T) {
+		b := nouvelleFausseBoite(t)
+		b.firmware = []byte{1, 3, 18, 0}
+		b.poserPlaylist(arbreReel())
+		b.mac = []byte{0x02, 0x99, 0x99, 0x99, 0x99, 0x99} // op30 ne correspond plus a la cle
+		if _, err := controlerFirmware(b.connecter()); cleErreur(err) != "err_firmware_ancien" {
+			t.Fatalf("erreur = %v, attendu err_firmware_ancien", err)
+		}
+	})
+}

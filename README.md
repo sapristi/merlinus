@@ -63,6 +63,11 @@ Les versions antérieures (par exemple 2.1.16) ne sont pas prises en charge :
 l'association est alors refusée, et le message indique la version détectée. Il suffit de mettre la boîte à jour avec
 l'application mobile de l'éditeur, puis de la reconnecter à Merlinus.
 
+Certaines boîtes annoncent une version d'une autre lignée (par exemple
+**1.3.18**) tout en utilisant le même format que la 2.1.23. Elles sont
+acceptées si leur playlist chiffrée (`pl_enc.bin`) est lisible : il faut donc
+qu'elles aient été synchronisées au moins une fois avec l'application mobile.
+
 ## Brancher la boîte
 
 Merlinus parle à la boîte sur son propre réseau Wi-Fi, sans Internet ni compte :
