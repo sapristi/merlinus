@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -27,6 +28,13 @@ type ImportPerso struct {
 // est deterministe (sha du contenu original) : reimporter le meme fichier ne
 // cree pas de doublon. La cover, si presente, est stockee en media-<uuid>.jpg.
 func ImporterAudioLocal(chemin string) (ImportPerso, error) {
+	return ImporterAudioLocalUUID(chemin, func(sha string) string { return itunes.UUIDDeterministe("perso:" + sha) })
+}
+
+// ImporterAudioLocalUUID : comme ImporterAudioLocal, l'uuid etant choisi par
+// uuidDe a partir du sha256 (hex) du contenu. Sert aux pistes d'une serie, dont
+// l'uuid doit differer de celui du meme fichier importe seul.
+func ImporterAudioLocalUUID(chemin string, uuidDe func(sha string) string) (ImportPerso, error) {
 	data, err := os.ReadFile(chemin)
 	if err != nil {
 		return ImportPerso{}, err
@@ -35,7 +43,7 @@ func ImporterAudioLocal(chemin string) (ImportPerso, error) {
 		return ImportPerso{}, fmt.Errorf("fichier audio vide ou tronque (%d octets)", len(data))
 	}
 	somme := sha256.Sum256(data)
-	uuid := itunes.UUIDDeterministe("perso:" + fmt.Sprintf("%x", somme))
+	uuid := uuidDe(fmt.Sprintf("%x", somme))
 
 	// sniff par extension du chemin (ct vide) : mp3 passe-plat, m4a -> aac.
 	ext, media, err := normaliserAudio(chemin, "", data)
@@ -91,4 +99,18 @@ func IllustrationJPEG(uuid string) []byte {
 		return nil
 	}
 	return d
+}
+
+// ShaFichier : sha256 (hex) du contenu d'un fichier, lu en flux.
+func ShaFichier(chemin string) (string, error) {
+	f, err := os.Open(chemin)
+	if err != nil {
+		return "", err
+	}
+	defer f.Close()
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
 }

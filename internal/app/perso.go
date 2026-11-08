@@ -329,13 +329,15 @@ func (a *App) ImporterDossierPerso() (HistoirePerso, error) {
 	return a.importerDossier(d)
 }
 
-// reNumeroPiste : numero de piste en tete de titre ("01. ", "10 - ", "3_").
-var reNumeroPiste = regexp.MustCompile(`^\d+\s*[.\-_)]\s*`)
+// reNumeroPiste : numero de piste en tete de titre ("01. ", "10 - ", "3_", "01 ").
+var reNumeroPiste = regexp.MustCompile(`^\d+(\s*[.\-_)]\s*|\s+)`)
 
 // importerDossier importe les audios a la racine d'un dossier (sous-dossiers et
 // autres fichiers ignores), tries par nom, en UNE entree serie titree du nom du
-// dossier. L'uuid de la serie derive de ses pistes : re-importer le meme dossier
-// met a jour la carte (titre, illustration et date conserves).
+// dossier. Les uuids (serie et pistes) derivent du contenu de TOUTE la serie :
+// re-importer le meme dossier met a jour la carte (titre, illustration et date
+// conserves), et une piste n'a jamais l'uuid du meme fichier importe seul ni
+// d'une autre serie (un uuid apparait au plus une fois dans l'arbre).
 func (a *App) importerDossier(dossier string) (HistoirePerso, error) {
 	entrees, err := os.ReadDir(dossier)
 	if err != nil {
@@ -351,10 +353,18 @@ func (a *App) importerDossier(dossier string) (HistoirePerso, error) {
 		return HistoirePerso{}, fmt.Errorf("aucun fichier audio (mp3, m4a, aac) dans %q", filepath.Base(dossier))
 	}
 	sort.Strings(noms)
-	h := HistoirePerso{Titre: filepath.Base(dossier), Ajout: time.Now().Unix()}
-	var ids []string
+	shas := make([]string, len(noms))
+	for i, n := range noms {
+		if shas[i], err = library.ShaFichier(filepath.Join(dossier, n)); err != nil {
+			return HistoirePerso{}, fmt.Errorf("%s : %w", n, err)
+		}
+	}
+	cle := "perso-serie:" + strings.Join(shas, ",")
+	h := HistoirePerso{UUID: itunes.UUIDDeterministe(cle), Titre: filepath.Base(dossier), Ajout: time.Now().Unix()}
 	for _, n := range noms {
-		imp, err := library.ImporterAudioLocal(filepath.Join(dossier, n))
+		imp, err := library.ImporterAudioLocalUUID(filepath.Join(dossier, n), func(sha string) string {
+			return itunes.UUIDDeterministe(cle + ":" + sha)
+		})
 		if err != nil {
 			return HistoirePerso{}, fmt.Errorf("%s : %w", n, err)
 		}
@@ -364,9 +374,7 @@ func (a *App) importerDossier(dossier string) (HistoirePerso, error) {
 		}
 		h.Pistes = append(h.Pistes, PistePerso{UUID: imp.UUID, Titre: titre, Ext: imp.Ext, Taille: imp.Taille})
 		h.Taille += imp.Taille
-		ids = append(ids, imp.UUID)
 	}
-	h.UUID = itunes.UUIDDeterministe("perso-serie:" + strings.Join(ids, ","))
 
 	a.muPerso.Lock()
 	l := a.lirePerso()

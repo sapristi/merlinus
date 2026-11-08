@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/louis49/merlinus/internal/library"
@@ -56,7 +57,7 @@ func reinitPerso(t *testing.T) *App {
 
 func TestImporterDossierCreeUneSerie(t *testing.T) {
 	a := reinitPerso(t)
-	d := dossierAudio(t, "L'opéra de la lune", "02. Deux.mp3", "01. Un.mp3", "10 - Dix.mp3")
+	d := dossierAudio(t, "L'opéra de la lune", "02. Deux.mp3", "01. Un.mp3", "10 - Dix.mp3", "11 Onze.mp3")
 	h, err := a.importerDossier(d)
 	if err != nil {
 		t.Fatal(err)
@@ -68,12 +69,12 @@ func TestImporterDossierCreeUneSerie(t *testing.T) {
 	for _, p := range h.Pistes {
 		titres = append(titres, p.Titre)
 	}
-	if want := []string{"Un", "Deux", "Dix"}; len(titres) != 3 || titres[0] != want[0] || titres[1] != want[1] || titres[2] != want[2] {
+	if want := []string{"Un", "Deux", "Dix", "Onze"}; strings.Join(titres, "|") != strings.Join(want, "|") {
 		t.Fatalf("pistes = %v, attendu %v (tri par nom, numero retire)", titres, want)
 	}
 	l := a.ListerHistoiresPerso()
-	if len(l) != 1 || l[0].UUID != h.UUID || len(l[0].Pistes) != 3 {
-		t.Fatalf("registre : %d entree(s), attendu une seule carte serie de 3 pistes : %+v", len(l), l)
+	if len(l) != 1 || l[0].UUID != h.UUID || len(l[0].Pistes) != 4 {
+		t.Fatalf("registre : %d entree(s), attendu une seule carte serie de 4 pistes : %+v", len(l), l)
 	}
 	if err := uuidMediaValide(h.UUID); err != nil {
 		t.Errorf("uuid de serie invalide : %v", err)
@@ -179,5 +180,32 @@ func TestSerieReferencee(t *testing.T) {
 	}
 	if err := a.SupprimerHistoirePerso(h.UUID); cleErreur(err) != "err_perso_referencee" {
 		t.Fatalf("suppression : %v, attendu err_perso_referencee", err)
+	}
+}
+
+// Un fichier importe seul PUIS dans une serie (meme contenu) donne deux
+// histoires distinctes : uuids differents (sinon etats melanges dans l'IHM et
+// uuid en double dans la playlist), et supprimer l'une ne touche pas l'autre.
+func TestFichierSeulEtDansSerieIndependants(t *testing.T) {
+	a := reinitPerso(t)
+	d := dossierAudio(t, "A tire d'aile", "01 Les gros crocodiles.mp3", "02 Autre.mp3")
+	seul, err := a.importerChemin(filepath.Join(d, "01 Les gros crocodiles.mp3"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	serie, err := a.importerDossier(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range serie.Pistes {
+		if p.UUID == seul.UUID {
+			t.Fatalf("la piste %q reprend l'uuid de l'histoire importee seule", p.Titre)
+		}
+	}
+	if err := a.SupprimerHistoirePerso(seul.UUID); err != nil {
+		t.Fatal(err)
+	}
+	if library.ExtensionAudio(serie.Pistes[0].UUID) == "" {
+		t.Fatal("supprimer l'histoire seule a retire l'audio de la piste de la serie")
 	}
 }
