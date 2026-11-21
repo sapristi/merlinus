@@ -448,6 +448,7 @@
 .sync-btn:hover{transform:translateY(-1px);box-shadow:var(--shadow-lg)}
 .sync-btn:disabled{opacity:.5;cursor:not-allowed;filter:grayscale(.4)}
 .sync-btn:disabled:hover{transform:none;box-shadow:var(--shadow)}
+.relire-btn{margin-top:8px;text-align:center}
 .box-options{display:flex;flex-direction:column;gap:8px;margin-top:14px}
 .opt-btn{width:100%;text-align:left;font-family:"Quicksand";font-weight:600;font-size:13.5px;color:var(--text);
   background:var(--card);border:1px solid var(--border);border-radius:12px;padding:11px 14px;cursor:pointer}

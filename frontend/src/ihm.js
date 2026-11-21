@@ -15,7 +15,7 @@ import { fmtOctets, fmtDuree } from './format.js';
 import { creerVueArbre } from './arbreboite.js';
 import { creerDecouverte } from './decouverte.js';
 
-import { EtatBoite, CatalogueInitial, RechercheCatalogue, EpisodesSerie, Internet, ArbreBoite, ArbreTravail, EnregistrerArbreTravail, Boites, NommerBoite, DemarrerVeille, PublierEditions, DefinirWifi, DefinirHoraires, LireHoraires, LireFavoris, LireEcoutes, RegleHeure, DernieresEcoutes, EjecterBoite, EtatSauvegarde, RestaurerBoite, RetirerBoite, SupprimerBoite, TelechargerEpisode, TelechargerImageSerie, EtatsBoite, EditionsEnAttente, EstimationStockage, LireStockage, TaillesArbre, EnregistrerSuivi, NouveautesAccueil, ImporterHistoirePerso, ImporterDossierPerso, ListerHistoiresPerso, SupprimerHistoirePerso, DefinirIllustrationPerso, RenommerHistoirePerso, VerifierMiseAJour, JournaliserIHM } from '../wailsjs/go/app/App';
+import { EtatBoite, CatalogueInitial, RechercheCatalogue, EpisodesSerie, Internet, ArbreBoite, ArbreTravail, EnregistrerArbreTravail, Boites, NommerBoite, DemarrerVeille, PublierEditions, DefinirWifi, DefinirHoraires, LireHoraires, LireFavoris, LireEcoutes, RegleHeure, RelireBoite, DernieresEcoutes, EjecterBoite, EtatSauvegarde, RestaurerBoite, RetirerBoite, SupprimerBoite, TelechargerEpisode, TelechargerImageSerie, EtatsBoite, EditionsEnAttente, EstimationStockage, LireStockage, TaillesArbre, EnregistrerSuivi, NouveautesAccueil, ImporterHistoirePerso, ImporterDossierPerso, ListerHistoiresPerso, SupprimerHistoirePerso, DefinirIllustrationPerso, RenommerHistoirePerso, VerifierMiseAJour, JournaliserIHM } from '../wailsjs/go/app/App';
 import { EventsOn, BrowserOpenURL } from '../wailsjs/runtime/runtime';
 import { creerListeVirtuelle } from './vliste.js';
 import { creerLecteur, fmtTemps } from './lecteur.js';
@@ -173,6 +173,7 @@ function shell() {
               <div class="counter rem"><div class="v" id="cRem">0</div><div class="k">${t('ihm_boite_c_rem')}</div></div>
             </div>
             <button class="sync-btn" id="syncBtn">${t('ihm_boite_sync')}</button>
+            <button class="opt-btn relire-btn" id="relireBtn" type="button" title="${t('ihm_boite_relire_titre')}">${t('ihm_boite_relire')}</button>
             <div class="sync-prog" id="syncProg" hidden>
               <div class="sync-prog-top"><span id="syncProgLabel"></span><span id="syncProgPct"></span></div>
               <div class="sync-prog-bar"><i id="syncProgFill"></i></div>
@@ -618,6 +619,7 @@ export async function monterIHM(app) {
     const rien = !!(b && b.editions === false);
     const sb = q('#syncBtn');
     if (sb) { sb.disabled = syncEnCours || !c || trop || rien; sb.title = rien && c ? t('ihm_sync_rien') : ''; }
+    const rl = q('#relireBtn'); if (rl) rl.disabled = syncEnCours || !c; // relecture : boite en AP requise
     const ow = q('#optWifi'); if (ow) ow.disabled = syncEnCours || !c; // Wi-Fi : boite en AP requise
     const oh = q('#optHoraires'); if (oh) oh.disabled = syncEnCours || !c; // Horaires : boite en AP requise
     // Restauration : boite en AP requise ; simple suppression : toujours possible.
@@ -1778,6 +1780,44 @@ export async function monterIHM(app) {
       finSync = null; libererSync();
       resumePoll();
       setTimeout(() => { cacherProgres(); btn.textContent = t('ihm_boite_sync'); majEtatBoutons(); }, 2500);
+    }
+  });
+  // Recalculer l'etat : relit la boite (playlist, inventaire, favoris,
+  // illustrations) quand elle a ete modifiee hors de Merlinus (app officielle).
+  // Abandonne les editions en cours, d'ou la confirmation si elles existent.
+  q('#relireBtn').addEventListener('click', async function () {
+    const btn = this;
+    const b = box(); if (!b || !b.mac) return;
+    if (b.editions && !confirm(t('ihm_boite_relire_confirm'))) return;
+    syncEnCours = true; majEtatBoutons();
+    let libererSync;
+    finSync = new Promise((r) => { libererSync = r; });
+    app.classList.add('sync-lock');
+    btn.textContent = t('ihm_boite_relire_ing');
+    afficheMsg('', '');
+    majProgres('prog_connexion', 0);
+    q('#boxCats').classList.add('tree-lock');
+    pausePoll();
+    const off = EventsOn('sync:progres', (m) => { if (m) majProgres(m.libelle, m.pct, m); });
+    try {
+      while (fileTravail) await fileTravail; // aucune ecriture du travail en vol apres sa suppression
+      await RelireBoite(b.mac);
+      afficheMsg(t('ihm_boite_relire_done'), 'ok');
+      arbreMac = null; await chargerArbre(true);
+      rechargerStockageRegistre(b);
+      await rafraichirEtats();
+    } catch (e) {
+      afficheMsg(msgErreur(e), 'err');
+    } finally {
+      off();
+      cacherProgres();
+      q('#boxCats').classList.remove('tree-lock');
+      app.classList.remove('sync-lock');
+      syncEnCours = false;
+      finSync = null; libererSync();
+      resumePoll();
+      btn.textContent = t('ihm_boite_relire');
+      majEtatBoutons();
     }
   });
   function resumePoll() { demarrerPoll(); }
